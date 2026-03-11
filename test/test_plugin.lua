@@ -1,13 +1,22 @@
 -- Headless integration test for jadx.nvim
 --
--- Run with:
---   nvim --headless -u ~/.config/nvim/init.lua \
---       -c "lua dofile('/home/user/neovim-for-jadx/test/test_plugin.lua')"
+-- Run via the wrapper (recommended):
+--   ./test/run_tests.sh
+--
+-- Or manually:
+--   nvim --headless \
+--       --cmd "set runtimepath+=/path/to/neovim-for-jadx" \
+--       -c "lua dofile('/path/to/neovim-for-jadx/test/test_plugin.lua')"
 --
 -- Results are written to /tmp/jadx-test-results.txt
 
+-- Derive repo root from this file's own path so the test works regardless
+-- of where the repo is cloned.  debug.getinfo source starts with '@'.
+local _this_file = debug.getinfo(1, "S").source:sub(2)
+local REPO_DIR    = _this_file:match("^(.+)/test/[^/]+$")
+local STUB_SERVER = REPO_DIR .. "/stub/server.py"
+
 local RESULTS_FILE = "/tmp/jadx-test-results.txt"
-local STUB_SERVER   = "/home/user/neovim-for-jadx/stub/server.py"
 
 local results = {}
 local pass_count = 0
