@@ -1,0 +1,42 @@
+plugins {
+    id 'java'
+    id 'com.github.johnrengelman.shadow' version '8.1.1'
+}
+
+group   = 'jadx'
+version = '0.1.0'
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    // Verify latest at https://central.sonatype.com/artifact/io.github.skylot/jadx-core
+    implementation 'io.github.skylot:jadx-core:1.5.0'
+
+    // Verify latest at https://central.sonatype.com/artifact/org.eclipse.lsp4j/org.eclipse.lsp4j
+    implementation 'org.eclipse.lsp4j:org.eclipse.lsp4j:0.21.2'
+
+    // Routes jadx-core's SLF4J logging to stderr so it doesn't touch stdout.
+    implementation 'org.slf4j:slf4j-simple:2.0.13'
+}
+
+jar {
+    manifest {
+        attributes 'Main-Class': 'jadx.lsp.Main'
+    }
+}
+
+shadowJar {
+    archiveBaseName.set('jadx-lsp')
+    archiveVersion.set('')
+    archiveClassifier.set('')
+    mergeServiceFiles()  // merges META-INF/services so jadx's plugin loader works
+}
+
+build.dependsOn shadowJar

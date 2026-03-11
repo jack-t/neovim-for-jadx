@@ -14,6 +14,11 @@ local M = {}
 -- Active LSP client id, nil if not running.
 local client_id = nil
 
+-- When textDocument/definition points to a jadx:// URI, the buffer fill is
+-- async.  We store the target position here (keyed by URI) so read_jadx_buf
+-- can apply it once the source has actually arrived.
+local pending_jumps = {}
+
 -- ─── URI helpers ────────────────────────────────────────────────────────────
 
 --- Extract the fully-qualified class name from a jadx:// URI.
@@ -76,9 +81,22 @@ local function read_jadx_buf(bufnr)
 
     vim.schedule(function()
       fill_buffer(bufnr, lines)
+      -- Mark the buffer as loaded so the definition handler can jump immediately
+      -- if the user navigates back to this buffer later.
+      vim.b[bufnr].jadx_loaded = true
       -- Attach the LSP client so textDocument/hover and textDocument/definition work.
       if client_id then
         vim.lsp.buf_attach_client(bufnr, client_id)
+      end
+      -- Apply any position that was deferred while the source was in-flight.
+      local uri = vim.api.nvim_buf_get_name(bufnr)
+      local jump = pending_jumps[uri]
+      if jump then
+        pending_jumps[uri] = nil
+        local wins = vim.fn.win_findbuf(bufnr)
+        if #wins > 0 then
+          pcall(vim.api.nvim_win_set_cursor, wins[1], { jump.line + 1, jump.character })
+        end
       end
     end)
   end)
@@ -133,6 +151,43 @@ function M.setup(opts)
     end,
     desc = "jadx: load decompiled source into buffer",
   })
+
+  -- Override the definition handler for jadx:// targets.
+  --
+  -- The default handler calls jump_to_location, which opens the buffer and
+  -- immediately tries to set the cursor.  For jadx:// buffers the source
+  -- arrives asynchronously, so the cursor positioning must be deferred until
+  -- after fill_buffer runs.  If the buffer is already loaded (the user opened
+  -- it before), we jump right away.
+  vim.lsp.handlers["textDocument/definition"] = function(err, result, ctx, _)
+    if err or not result then return end
+    local locs = vim.islist(result) and result or { result }
+    if #locs == 0 then return end
+    local loc = locs[1]
+
+    if type(loc.uri) == "string" and loc.uri:match("^jadx://") then
+      local pos    = loc.range and loc.range.start
+      local bufnr  = vim.fn.bufnr(loc.uri)
+      local loaded = bufnr ~= -1 and vim.b[bufnr] and vim.b[bufnr].jadx_loaded
+
+      if pos and not loaded then
+        -- Source not yet in the buffer; stash the position for read_jadx_buf.
+        pending_jumps[loc.uri] = pos
+      end
+
+      -- Open (or switch to) the jadx:// buffer, triggering BufReadCmd if new.
+      vim.cmd("edit " .. loc.uri)
+
+      if pos and loaded then
+        -- Buffer already filled; jump now.
+        pcall(vim.api.nvim_win_set_cursor, 0, { pos.line + 1, pos.character })
+      end
+    else
+      local client = vim.lsp.get_client_by_id(ctx.client_id)
+      local enc    = client and client.offset_encoding or "utf-8"
+      vim.lsp.util.jump_to_location(loc, enc)
+    end
+  end
 end
 
 --- Convenience command: open a class by FQN in a new buffer.
