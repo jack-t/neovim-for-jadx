@@ -1,7 +1,16 @@
-plugins {
-    id 'java'
-    id 'com.github.johnrengelman.shadow' version '8.1.1'
+// Use the buildscript block with the Maven Central fork of the Shadow plugin
+// (io.github.goooler.shadow) so no access to plugins-artifacts.gradle.org is needed.
+buildscript {
+    repositories {
+        mavenCentral()
+    }
+    dependencies {
+        classpath 'io.github.goooler.shadow:shadow-gradle-plugin:8.1.8'
+    }
 }
+
+apply plugin: 'java'
+apply plugin: 'io.github.goooler.shadow'
 
 group   = 'jadx'
 version = '0.1.0'
@@ -13,17 +22,26 @@ java {
 
 repositories {
     mavenCentral()
+    // Required for com.android.tools.smali:smali-baksmali (transitive dep of jadx-dex-input)
+    // and other Android tooling pulled in transitively by jadx-dex-input.
+    google()
 }
 
 dependencies {
-    // Verify latest at https://central.sonatype.com/artifact/io.github.skylot/jadx-core
-    implementation 'io.github.skylot:jadx-core:1.5.0'
+    // https://central.sonatype.com/artifact/io.github.skylot/jadx-core
+    implementation 'io.github.skylot:jadx-core:1.5.4'
 
-    // Verify latest at https://central.sonatype.com/artifact/org.eclipse.lsp4j/org.eclipse.lsp4j
-    implementation 'org.eclipse.lsp4j:org.eclipse.lsp4j:0.21.2'
+    // jadx-core is the decompiler engine only; jadx-dex-input registers the
+    // ServiceLoader-based reader for DEX files and their wrappers (APK, ZIP).
+    // Without this, JadxDecompiler.load() finds no classes when given an APK.
+    // mergeServiceFiles() in shadowJar ensures the registration survives JAR merging.
+    implementation 'io.github.skylot:jadx-dex-input:1.5.4'
+
+    // https://central.sonatype.com/artifact/org.eclipse.lsp4j/org.eclipse.lsp4j
+    implementation 'org.eclipse.lsp4j:org.eclipse.lsp4j:0.24.0'
 
     // Routes jadx-core's SLF4J logging to stderr so it doesn't touch stdout.
-    implementation 'org.slf4j:slf4j-simple:2.0.13'
+    implementation 'org.slf4j:slf4j-simple:2.0.17'
 }
 
 jar {

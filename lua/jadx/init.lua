@@ -197,4 +197,34 @@ function M.open(fqn)
   vim.cmd("edit jadx://" .. fqn)
 end
 
+--- Hot-load a new APK/DEX/JAR without restarting the server.
+---
+--- Sends the workspace/executeCommand "jadx.loadFile" to the running server.
+--- The server swaps in a new JadxDecompiler instance transparently; already-open
+--- buffers still show their old source (re-open them to pick up the new one).
+---
+--- Example: require("jadx").load_file("/path/to/other.apk")
+function M.load_file(path)
+  if not client_id then
+    vim.notify("jadx: LSP server not running — call require('jadx').setup() first", vim.log.levels.ERROR)
+    return
+  end
+  local client = vim.lsp.get_client_by_id(client_id)
+  if not client then
+    vim.notify("jadx: LSP client gone", vim.log.levels.ERROR)
+    client_id = nil
+    return
+  end
+  client.request("workspace/executeCommand", {
+    command   = "jadx.loadFile",
+    arguments = { path },
+  }, function(err, _)
+    if err then
+      vim.schedule(function()
+        vim.notify("jadx: load_file error: " .. vim.inspect(err), vim.log.levels.ERROR)
+      end)
+    end
+  end)
+end
+
 return M

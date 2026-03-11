@@ -127,6 +127,7 @@ def handle_initialize(req_id, params):
             "textDocumentSync": 1,      # Full sync
             "hoverProvider":    True,
             "definitionProvider": True,
+            "executeCommandProvider": {"commands": ["jadx.loadFile"]},
         },
         "serverInfo": {"name": "jadx-lsp-stub", "version": "0.0.1"},
     })
@@ -169,6 +170,17 @@ def handle_definition(req_id, params):
     send_response(req_id, DEFINITION_TARGET)
 
 
+def handle_execute_command(req_id, params):
+    command = (params or {}).get("command", "")
+    args    = (params or {}).get("arguments", [])
+    if command == "jadx.loadFile":
+        path = args[0] if args else "<none>"
+        log(f"executeCommand jadx.loadFile: path={path!r} (stub: ignoring)")
+    else:
+        log(f"executeCommand: unknown command {command!r}")
+    send_response(req_id, None)
+
+
 def handle_shutdown(req_id, _params):
     send_response(req_id, None)
 
@@ -176,11 +188,12 @@ def handle_shutdown(req_id, _params):
 # ─── Dispatch ────────────────────────────────────────────────────────────────
 
 HANDLERS = {
-    "initialize":            handle_initialize,
-    "jadx/classSource":      handle_class_source,
-    "textDocument/hover":    handle_hover,
+    "initialize":              handle_initialize,
+    "jadx/classSource":        handle_class_source,
+    "textDocument/hover":      handle_hover,
     "textDocument/definition": handle_definition,
-    "shutdown":              handle_shutdown,
+    "workspace/executeCommand": handle_execute_command,
+    "shutdown":                handle_shutdown,
 }
 
 SILENT_NOTIFICATIONS = {
