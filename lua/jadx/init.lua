@@ -63,8 +63,11 @@ local function read_jadx_buf(bufnr)
 
   -- Request decompiled source via the custom jadx/classSource method.
   client.request("jadx/classSource", { fqn = fqn }, function(err, result)
+    -- This callback runs on a libuv thread; all vim.* calls must go through vim.schedule.
     if err then
-      vim.notify("jadx: error fetching source for " .. fqn .. ": " .. vim.inspect(err), vim.log.levels.ERROR)
+      vim.schedule(function()
+        vim.notify("jadx: error fetching source for " .. fqn .. ": " .. vim.inspect(err), vim.log.levels.ERROR)
+      end)
       return
     end
 
@@ -74,7 +77,9 @@ local function read_jadx_buf(bufnr)
     vim.schedule(function()
       fill_buffer(bufnr, lines)
       -- Attach the LSP client so textDocument/hover and textDocument/definition work.
-      vim.lsp.buf_attach_client(bufnr, client_id)
+      if client_id then
+        vim.lsp.buf_attach_client(bufnr, client_id)
+      end
     end)
   end)
 end
