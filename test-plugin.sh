@@ -10,13 +10,13 @@ set -e
 # Get the absolute path to the plugin directory
 PLUGIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Create a temporary directory for this session's config
-NVIM_HOME=$(mktemp -d)
-trap "rm -rf '$NVIM_HOME'" EXIT
+# Create temporary directories for isolated Neovim environment
+NVIM_CONFIG=$(mktemp -d)
+NVIM_DATA=$(mktemp -d)
+trap "rm -rf '$NVIM_CONFIG' '$NVIM_DATA'" EXIT
 
 # Create the init.lua that loads our plugin
-mkdir -p "$NVIM_HOME"
-cat > "$NVIM_HOME/init.lua" <<EOF
+cat > "$NVIM_CONFIG/init.lua" <<EOF
 -- Temporary config for testing jadx.nvim
 
 -- Add the plugin to the runtime path
@@ -32,5 +32,7 @@ require("jadx").setup({
 vim.notify("jadx.nvim loaded from: $PLUGIN_DIR", vim.log.levels.INFO)
 EOF
 
-# Launch Neovim with the isolated config
-NVIM_APPNAME="$NVIM_HOME" exec nvim "$@"
+# Launch Neovim with the isolated config and data directories
+export XDG_CONFIG_HOME="$NVIM_CONFIG"
+export XDG_DATA_HOME="$NVIM_DATA"
+exec nvim "$@"
