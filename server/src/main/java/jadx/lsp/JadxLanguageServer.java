@@ -10,9 +10,7 @@ import jadx.api.JavaMethod;
 import jadx.api.JavaNode;
 import jadx.api.JadxArgs;
 import jadx.api.JadxDecompiler;
-import jadx.api.metadata.ICodeAnnotation;
 import jadx.api.metadata.ICodeNodeRef;
-import jadx.api.metadata.annotations.NodeDeclareRef;
 import jadx.core.dex.info.AccessInfo;
 import jadx.core.dex.instructions.args.ArgType;
 
@@ -142,7 +140,7 @@ public class JadxLanguageServer
     public CompletableFuture<ClassSourceResult> classSource(ClassSourceParams params) {
         return jadxReady.get().thenApplyAsync(__ -> {
             if (jadx == null) return new ClassSourceResult(null);
-            JavaClass cls = findClass(params.getFqn());
+            JavaClass cls = DefinitionResolver.findClass(jadx, params.getFqn());
             if (cls == null) return new ClassSourceResult(null);
             return new ClassSourceResult(cls.getCode());
         }, executor);
@@ -155,37 +153,10 @@ public class JadxLanguageServer
             definition(DefinitionParams params) {
 
         return jadxReady.get().thenApplyAsync(__ -> {
-            List<Location> empty = Collections.emptyList();
-
-            if (jadx == null) return left(empty);
-
             String fqn = fqnFromUri(params.getTextDocument().getUri());
-            if (fqn == null) return left(empty);
-
-            JavaClass cls = findClass(fqn);
-            if (cls == null) return left(empty);
-
-            ICodeInfo codeInfo = cls.getCodeInfo();
-            int offset = PositionConverter.toOffset(codeInfo.getCodeStr(), params.getPosition());
-
-            ICodeNodeRef ref = toNodeRef(codeInfo.getCodeMetadata().getAt(offset));
-            if (ref == null) return left(empty);
-
-            JavaNode  target       = jadx.getJavaNodeByRef(ref);
-            if (target == null) return left(empty);
-
-            JavaClass targetCls    = target.getTopParentClass();
-            ICodeInfo targetCdInfo = targetCls.getCodeInfo(); // triggers decompilation before getDefPos()
-
-            int defPos = target.getDefPos();
-            if (defPos <= 0) return left(empty);
-
-            String   targetCode = targetCdInfo.getCodeStr();
-            Position pos        = PositionConverter.toPosition(targetCode, defPos);
-            Location  loc        = new Location(
-                    "jadx://" + targetCls.getFullName(),
-                    new Range(pos, pos));
-            return left(Collections.singletonList(loc));
+            return DefinitionResolver.resolve(jadx, fqn, params.getPosition())
+                    .map(loc -> left(Collections.singletonList(loc)))
+                    .orElseGet(() -> left(Collections.emptyList()));
         }, executor);
     }
 
@@ -197,13 +168,13 @@ public class JadxLanguageServer
             String fqn = fqnFromUri(params.getTextDocument().getUri());
             if (fqn == null) return null;
 
-            JavaClass cls = findClass(fqn);
+            JavaClass cls = DefinitionResolver.findClass(jadx, fqn);
             if (cls == null) return null;
 
             ICodeInfo codeInfo = cls.getCodeInfo();
             int offset = PositionConverter.toOffset(codeInfo.getCodeStr(), params.getPosition());
 
-            ICodeNodeRef ref = toNodeRef(codeInfo.getCodeMetadata().getAt(offset));
+            ICodeNodeRef ref = DefinitionResolver.toNodeRef(codeInfo.getCodeMetadata().getAt(offset));
             if (ref == null) return null;
 
             JavaNode node = jadx.getJavaNodeByRef(ref);
@@ -301,31 +272,10 @@ public class JadxLanguageServer
 
     // ─── Helpers ─────────────────────────────────────────────────────────────
 
-    private JavaClass findClass(String fqn) {
-        if (fqn == null || jadx == null) return null;
-        JavaClass cls = jadx.searchJavaClassByOrigFullName(fqn);
-        if (cls == null) cls = jadx.searchJavaClassByAliasFullName(fqn);
-        return cls;
-    }
-
     /** "jadx://com.example.Foo" -> "com.example.Foo", anything else -> null. */
     private static String fqnFromUri(String uri) {
         if (uri == null || !uri.startsWith("jadx://")) return null;
         return uri.substring("jadx://".length());
-    }
-
-    /**
-     * Normalise an annotation to a navigable ICodeNodeRef.
-     *
-     * At a reference site the annotation IS the node (ClassNode/MethodNode/FieldNode
-     * all implement ICodeNodeRef).  At a declaration site the annotation is a
-     * NodeDeclareRef wrapper; we unwrap it so hover still shows info.
-     */
-    private static ICodeNodeRef toNodeRef(ICodeAnnotation ann) {
-        if (ann == null) return null;
-        if (ann instanceof NodeDeclareRef decl) return decl.getNode();
-        if (ann instanceof ICodeNodeRef ref)   return ref;
-        return null;
     }
 
     private static String buildHoverMarkdown(JavaNode node) {
