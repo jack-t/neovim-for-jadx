@@ -13,4 +13,7 @@ public interface JadxExtensions {
 
     @JsonRequest("jadx/classSource")
     CompletableFuture<ClassSourceResult> classSource(ClassSourceParams params);
+
+    @JsonRequest("jadx/symbols")
+    CompletableFuture<SymbolsResult> symbols();
 }

@@ -49,6 +49,7 @@ import org.eclipse.lsp4j.services.TextDocumentService;
 import org.eclipse.lsp4j.services.WorkspaceService;
 
 import java.io.File;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
@@ -148,6 +149,27 @@ public class JadxLanguageServer
         }, executor);
     }
 
+    @Override
+    public CompletableFuture<SymbolsResult> symbols() {
+        return jadxReady.get().thenApplyAsync(__ -> {
+            if (jadx == null) return new SymbolsResult(Collections.emptyList());
+            List<SymbolsResult.SymbolEntry> entries = new ArrayList<>();
+            for (JavaClass cls : jadx.getClasses()) {
+                String clsFqn = cls.getFullName();
+                entries.add(new SymbolsResult.SymbolEntry(clsFqn, "class", clsFqn));
+                for (JavaMethod mth : cls.getMethods()) {
+                    entries.add(new SymbolsResult.SymbolEntry(
+                            mth.getName(), "method", clsFqn));
+                }
+                for (JavaField fld : cls.getFields()) {
+                    entries.add(new SymbolsResult.SymbolEntry(
+                            fld.getName(), "field", clsFqn));
+                }
+            }
+            return new SymbolsResult(entries);
+        }, executor);
+    }
+
     // ─── TextDocumentService ─────────────────────────────────────────────────
 
     @Override
@@ -236,6 +258,7 @@ public class JadxLanguageServer
         CompletableFuture<Void> newReady = new CompletableFuture<>();
         jadxReady.set(newReady);
 
+        notify(MessageType.Log, "jadx-lsp: loading " + path + " ...");
         executor.submit(() -> {
             JadxDecompiler old = jadx;
             try {
@@ -246,7 +269,8 @@ public class JadxLanguageServer
                 jadx = fresh;
                 if (old != null) old.close();
                 newReady.complete(null);
-                notify(MessageType.Info, "jadx-lsp: loaded " + path);
+                int classCount = fresh.getClasses().size();
+                notify(MessageType.Info, "jadx-lsp: loaded " + path + " (" + classCount + " classes)");
             } catch (Exception e) {
                 newReady.complete(null); // unblock waiting requests
                 notify(MessageType.Error, "jadx-lsp: failed to load " + path + ": " + e.getMessage());
@@ -259,12 +283,15 @@ public class JadxLanguageServer
      * Load jadx for the first time, completing the provided future when done.
      */
     private void loadJadxAsync(String path, CompletableFuture<Void> gate) {
+        notify(MessageType.Log, "jadx-lsp: loading " + path + " ...");
         executor.submit(() -> {
             try {
                 JadxArgs args = new JadxArgs();
                 args.setInputFile(new File(path));
                 jadx = new JadxDecompiler(args);
                 jadx.load();
+                int classCount = jadx.getClasses().size();
+                notify(MessageType.Info, "jadx-lsp: loaded " + path + " (" + classCount + " classes)");
             } catch (Exception e) {
                 stderr("Failed to load jadx: " + e.getMessage());
                 notify(MessageType.Error, "jadx-lsp: failed to load " + path + ": " + e.getMessage());

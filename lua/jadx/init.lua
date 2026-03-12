@@ -19,6 +19,59 @@ local client_id = nil
 -- can apply it once the source has actually arrived.
 local pending_jumps = {}
 
+-- ─── Status buffer ──────────────────────────────────────────────────────────
+
+local status_bufnr = nil
+local status_lines = {}
+
+--- Append a timestamped line to the status buffer.
+local function status_log(level, msg)
+  local ts = os.date("%H:%M:%S")
+  local prefix = ({ INFO = " ", WARN = "!", ERROR = "X", DEBUG = "." })[level] or " "
+  local line = string.format("[%s] %s %s", ts, prefix, msg)
+  table.insert(status_lines, line)
+
+  -- Update the buffer if it exists and is valid.
+  if status_bufnr and vim.api.nvim_buf_is_valid(status_bufnr) then
+    vim.bo[status_bufnr].modifiable = true
+    vim.api.nvim_buf_set_lines(status_bufnr, -1, -1, false, { line })
+    vim.bo[status_bufnr].modifiable = false
+    -- Auto-scroll any window showing the status buffer.
+    for _, win in ipairs(vim.fn.win_findbuf(status_bufnr)) do
+      local lc = vim.api.nvim_buf_line_count(status_bufnr)
+      pcall(vim.api.nvim_win_set_cursor, win, { lc, 0 })
+    end
+  end
+end
+
+--- Open (or focus) the jadx status buffer in a split.
+local function open_status_buf()
+  -- Reuse the buffer if it already exists.
+  if status_bufnr and vim.api.nvim_buf_is_valid(status_bufnr) then
+    local wins = vim.fn.win_findbuf(status_bufnr)
+    if #wins > 0 then
+      vim.api.nvim_set_current_win(wins[1])
+      return
+    end
+    vim.cmd("botright split")
+    vim.cmd("resize 12")
+    vim.api.nvim_win_set_buf(0, status_bufnr)
+    return
+  end
+
+  vim.cmd("botright split")
+  vim.cmd("resize 12")
+  status_bufnr = vim.api.nvim_create_buf(false, true)
+  vim.api.nvim_win_set_buf(0, status_bufnr)
+  vim.api.nvim_buf_set_name(status_bufnr, "jadx://status")
+  vim.bo[status_bufnr].buftype    = "nofile"
+  vim.bo[status_bufnr].swapfile   = false
+  vim.bo[status_bufnr].filetype   = "jadx-status"
+  vim.bo[status_bufnr].modifiable = true
+  vim.api.nvim_buf_set_lines(status_bufnr, 0, -1, false, status_lines)
+  vim.bo[status_bufnr].modifiable = false
+end
+
 -- ─── URI helpers ────────────────────────────────────────────────────────────
 
 --- Extract the fully-qualified class name from a jadx:// URI.
@@ -57,29 +110,38 @@ end
 
 --- Called whenever Neovim opens a buffer whose name matches jadx://*.
 local function read_jadx_buf(bufnr)
+  local uri = vim.api.nvim_buf_get_name(bufnr)
+
+  -- Don't try to fetch source for the status buffer.
+  if uri == "jadx://status" then return end
+
   -- Mark the buffer as a scratch buffer so Neovim won't try to read it from disk.
   vim.bo[bufnr].buftype  = "nofile"
   vim.bo[bufnr].swapfile = false
 
-  local uri = vim.api.nvim_buf_get_name(bufnr)
   local fqn = fqn_from_uri(uri)
 
   if not fqn then
     vim.notify("jadx: malformed URI: " .. uri, vim.log.levels.ERROR)
+    status_log("ERROR", "Malformed URI: " .. uri)
     return
   end
 
   if not client_id then
     vim.notify("jadx: LSP server not running — call require('jadx').setup() first", vim.log.levels.ERROR)
+    status_log("ERROR", "LSP server not running")
     return
   end
 
   local client = vim.lsp.get_client_by_id(client_id)
   if not client then
     vim.notify("jadx: LSP client gone (id=" .. tostring(client_id) .. ")", vim.log.levels.ERROR)
+    status_log("ERROR", "LSP client gone (id=" .. tostring(client_id) .. ")")
     client_id = nil
     return
   end
+
+  status_log("INFO", "Decompiling " .. fqn .. " ...")
 
   -- Request decompiled source via the custom jadx/classSource method.
   client.request("jadx/classSource", { fqn = fqn }, function(err, result)
@@ -87,6 +149,7 @@ local function read_jadx_buf(bufnr)
     if err then
       vim.schedule(function()
         vim.notify("jadx: error fetching source for " .. fqn .. ": " .. vim.inspect(err), vim.log.levels.ERROR)
+        status_log("ERROR", "Failed to decompile " .. fqn .. ": " .. vim.inspect(err))
       end)
       return
     end
@@ -96,6 +159,7 @@ local function read_jadx_buf(bufnr)
 
     vim.schedule(function()
       fill_buffer(bufnr, lines)
+      status_log("INFO", "Decompiled " .. fqn .. " (" .. #lines .. " lines)")
       -- Mark the buffer as loaded so the definition handler can jump immediately
       -- if the user navigates back to this buffer later.
       vim.b[bufnr].jadx_loaded = true
@@ -104,10 +168,10 @@ local function read_jadx_buf(bufnr)
         attach_client(bufnr, client_id)
       end
       -- Apply any position that was deferred while the source was in-flight.
-      local uri = vim.api.nvim_buf_get_name(bufnr)
-      local jump = pending_jumps[uri]
+      local buf_uri = vim.api.nvim_buf_get_name(bufnr)
+      local jump = pending_jumps[buf_uri]
       if jump then
-        pending_jumps[uri] = nil
+        pending_jumps[buf_uri] = nil
         local wins = vim.fn.win_findbuf(bufnr)
         if #wins > 0 then
           pcall(vim.api.nvim_win_set_cursor, wins[1], { jump.line + 1, jump.character })
@@ -115,6 +179,182 @@ local function read_jadx_buf(bufnr)
       end
     end)
   end)
+end
+
+-- ─── FZF integration ────────────────────────────────────────────────────────
+
+--- Fetch symbols from the server and present them in fzf for fuzzy selection.
+local function fzf_search()
+  if not client_id then
+    vim.notify("jadx: LSP server not running", vim.log.levels.ERROR)
+    return
+  end
+  local client = vim.lsp.get_client_by_id(client_id)
+  if not client then
+    vim.notify("jadx: LSP client gone", vim.log.levels.ERROR)
+    client_id = nil
+    return
+  end
+
+  status_log("INFO", "Fetching symbols for search ...")
+
+  client.request("jadx/symbols", vim.empty_dict(), function(err, result)
+    if err then
+      vim.schedule(function()
+        vim.notify("jadx: symbol search error: " .. vim.inspect(err), vim.log.levels.ERROR)
+        status_log("ERROR", "Symbol search failed: " .. vim.inspect(err))
+      end)
+      return
+    end
+
+    vim.schedule(function()
+      local symbols = (result and result.symbols) or {}
+      if #symbols == 0 then
+        vim.notify("jadx: no symbols found (is a file loaded?)", vim.log.levels.WARN)
+        status_log("WARN", "No symbols found for search")
+        return
+      end
+
+      status_log("INFO", "Search: " .. #symbols .. " symbols available")
+
+      -- Build display lines: "kind\tname\tparent_class"
+      local fzf_lines = {}
+      for _, sym in ipairs(symbols) do
+        local display
+        if sym.kind == "class" then
+          display = "[class]  " .. sym.name
+        elseif sym.kind == "method" then
+          display = "[method] " .. sym.parent .. "." .. sym.name
+        elseif sym.kind == "field" then
+          display = "[field]  " .. sym.parent .. "." .. sym.name
+        else
+          display = "[" .. sym.kind .. "] " .. sym.name
+        end
+        table.insert(fzf_lines, display)
+      end
+
+      -- Write lines to a temp file for fzf input.
+      local tmpfile = vim.fn.tempname()
+      vim.fn.writefile(fzf_lines, tmpfile)
+
+      -- Run fzf in a terminal buffer.
+      local fzf_cmd = string.format(
+        "fzf --ansi --prompt='jadx> ' --header='Search classes, methods, fields' < %s",
+        vim.fn.shellescape(tmpfile)
+      )
+
+      -- Open a floating window for fzf.
+      local width  = math.floor(vim.o.columns * 0.8)
+      local height = math.floor(vim.o.lines * 0.6)
+      local row    = math.floor((vim.o.lines - height) / 2)
+      local col    = math.floor((vim.o.columns - width) / 2)
+      local float_buf = vim.api.nvim_create_buf(false, true)
+      local float_win = vim.api.nvim_open_win(float_buf, true, {
+        relative = "editor",
+        width    = width,
+        height   = height,
+        row      = row,
+        col      = col,
+        style    = "minimal",
+        border   = "rounded",
+      })
+
+      vim.fn.termopen(fzf_cmd, {
+        on_exit = function(_job_id, exit_code, _event)
+          vim.schedule(function()
+            -- Read the terminal buffer contents to find the selected line.
+            local selected = nil
+            if exit_code == 0 then
+              local term_lines = vim.api.nvim_buf_get_lines(float_buf, 0, -1, false)
+              -- fzf writes the selected item as the last non-empty line before exit.
+              for i = #term_lines, 1, -1 do
+                local l = vim.trim(term_lines[i])
+                if l ~= "" then
+                  selected = l
+                  break
+                end
+              end
+            end
+
+            -- Close the float.
+            if vim.api.nvim_win_is_valid(float_win) then
+              vim.api.nvim_win_close(float_win, true)
+            end
+            if vim.api.nvim_buf_is_valid(float_buf) then
+              vim.api.nvim_buf_delete(float_buf, { force = true })
+            end
+            vim.fn.delete(tmpfile)
+
+            if not selected or selected == "" then return end
+
+            -- Parse the selection to determine which class to open.
+            -- Format: "[kind]  parent.name" or "[class]  fqn"
+            local class_fqn = nil
+            -- Try class pattern first: "[class]  com.example.Foo"
+            class_fqn = selected:match("^%[class%]%s+(.+)$")
+            if not class_fqn then
+              -- Method/field pattern: "[method] com.example.Foo.bar"
+              local full = selected:match("^%[%w+%]%s+(.+)$")
+              if full then
+                -- Extract the class FQN (everything before the last dot).
+                class_fqn = full:match("^(.+)%.[^.]+$")
+              end
+            end
+
+            if class_fqn then
+              status_log("INFO", "Opening " .. class_fqn .. " from search")
+              vim.cmd("edit jadx://" .. class_fqn)
+            end
+          end)
+        end,
+      })
+
+      -- Enter terminal mode so user can type immediately.
+      vim.cmd("startinsert")
+    end)
+  end)
+end
+
+-- ─── Config file ─────────────────────────────────────────────────────────────
+
+--- Source the user's jadx-init.vim config file if it exists.
+--- Looks in the plugin directory first (shipped default), then in the user's
+--- Neovim config directory for overrides.
+local function load_config()
+  -- Determine the plugin root directory.
+  local plugin_dir = vim.env.JADX_PLUGIN_DIR
+  if not plugin_dir then
+    -- Derive from the runtime path entry that contains this file.
+    local info = debug.getinfo(1, "S")
+    if info and info.source and info.source:sub(1, 1) == "@" then
+      local lua_path = info.source:sub(2)
+      plugin_dir = vim.fn.fnamemodify(lua_path, ":h:h:h")
+    end
+  end
+
+  local sourced = false
+
+  -- 1. Source the shipped default config from the plugin directory.
+  if plugin_dir then
+    local default_config = plugin_dir .. "/jadx-init.vim"
+    if vim.fn.filereadable(default_config) == 1 then
+      vim.cmd("source " .. vim.fn.fnameescape(default_config))
+      status_log("INFO", "Loaded default config: " .. default_config)
+      sourced = true
+    end
+  end
+
+  -- 2. Source the user's override config (takes precedence).
+  local user_config = vim.fn.stdpath("config") .. "/jadx-init.vim"
+  if vim.fn.filereadable(user_config) == 1 then
+    vim.cmd("source " .. vim.fn.fnameescape(user_config))
+    status_log("INFO", "Loaded user config: " .. user_config)
+    sourced = true
+  end
+
+  if not sourced then
+    status_log("DEBUG", "No jadx-init.vim found (using built-in defaults)")
+  end
 end
 
 -- ─── Public API ──────────────────────────────────────────────────────────────
@@ -137,6 +377,12 @@ function M.setup(opts)
   local init_options = {}
   if opts.file then
     init_options.jadxFile = opts.file
+  end
+
+  status_log("INFO", "jadx.nvim starting up")
+  status_log("INFO", "Server command: " .. table.concat(cmd, " "))
+  if opts.file then
+    status_log("INFO", "Initial file: " .. opts.file)
   end
 
   -- Capture the default handler before starting the client so the per-client
@@ -184,10 +430,40 @@ function M.setup(opts)
           default_def_handler(err, result, ctx, config)
         end
       end,
+      -- Capture server log/info messages and route them to the status buffer.
+      ["window/showMessage"] = function(_err, result, _ctx, _config)
+        if not result then return end
+        local level_map = {
+          [1] = "ERROR",   -- Error
+          [2] = "WARN",    -- Warning
+          [3] = "INFO",    -- Info
+          [4] = "DEBUG",   -- Log
+        }
+        local level = level_map[result.type] or "INFO"
+        status_log(level, result.message or "")
+        -- Also show errors and warnings via vim.notify so users see them.
+        if result.type == 1 then
+          vim.notify(result.message, vim.log.levels.ERROR)
+        elseif result.type == 2 then
+          vim.notify(result.message, vim.log.levels.WARN)
+        elseif result.type == 3 then
+          vim.notify(result.message, vim.log.levels.INFO)
+        end
+      end,
     },
+    on_init = function(_client, _init_result)
+      vim.schedule(function()
+        status_log("INFO", "LSP server initialized")
+      end)
+    end,
     on_exit = function(code, _signal)
       vim.schedule(function()
-        vim.notify(("jadx: LSP server exited (code %d)"):format(code), vim.log.levels.WARN)
+        if code == 0 then
+          status_log("INFO", "LSP server exited normally")
+        else
+          status_log("ERROR", "LSP server exited with code " .. code)
+          vim.notify(("jadx: LSP server exited (code %d)"):format(code), vim.log.levels.WARN)
+        end
       end)
       client_id = nil
     end,
@@ -195,8 +471,11 @@ function M.setup(opts)
 
   if not client_id then
     vim.notify("jadx: failed to start LSP client", vim.log.levels.ERROR)
+    status_log("ERROR", "Failed to start LSP client")
     return
   end
+
+  status_log("INFO", "LSP client started (id=" .. client_id .. ")")
 
   -- Handle `:edit jadx://com.example.ClassName`.
   -- Use a named augroup that is cleared first so repeated setup() calls do not
@@ -211,11 +490,36 @@ function M.setup(opts)
     desc = "jadx: load decompiled source into buffer",
   })
 
-  -- Register :JadxLoad <path> so users can hot-load a file without calling
-  -- the Lua API directly (matches the docstring at the top of this file).
+  -- Register user commands.
   vim.api.nvim_create_user_command("JadxLoad", function(cmd_opts)
     M.load_file(cmd_opts.args)
   end, { nargs = 1, desc = "jadx: hot-load a new APK/DEX/JAR file" })
+
+  vim.api.nvim_create_user_command("JadxStatus", function()
+    M.show_status()
+  end, { nargs = 0, desc = "jadx: open the status buffer" })
+
+  vim.api.nvim_create_user_command("JadxSearch", function()
+    M.search()
+  end, { nargs = 0, desc = "jadx: fuzzy-search symbols with fzf" })
+
+  vim.api.nvim_create_user_command("JadxOpen", function(cmd_opts)
+    M.open(cmd_opts.args)
+  end, { nargs = 1, desc = "jadx: open a class by fully-qualified name",
+    complete = function() return {} end })
+
+  -- Load configuration files.
+  load_config()
+end
+
+--- Open (or focus) the jadx status buffer.
+function M.show_status()
+  open_status_buf()
+end
+
+--- Fuzzy-search symbols (classes, methods, fields) using fzf.
+function M.search()
+  fzf_search()
 end
 
 --- Convenience command: open a class by FQN in a new buffer.
@@ -235,14 +539,17 @@ end
 function M.load_file(path)
   if not client_id then
     vim.notify("jadx: LSP server not running — call require('jadx').setup() first", vim.log.levels.ERROR)
+    status_log("ERROR", "Cannot load file: LSP server not running")
     return
   end
   local client = vim.lsp.get_client_by_id(client_id)
   if not client then
     vim.notify("jadx: LSP client gone", vim.log.levels.ERROR)
+    status_log("ERROR", "LSP client gone")
     client_id = nil
     return
   end
+  status_log("INFO", "Requesting load of " .. path .. " ...")
   client.request("workspace/executeCommand", {
     command   = "jadx.loadFile",
     arguments = { path },
@@ -250,6 +557,7 @@ function M.load_file(path)
     if err then
       vim.schedule(function()
         vim.notify("jadx: load_file error: " .. vim.inspect(err), vim.log.levels.ERROR)
+        status_log("ERROR", "Load file error: " .. vim.inspect(err))
       end)
     end
   end)
