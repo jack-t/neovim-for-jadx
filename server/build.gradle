@@ -42,6 +42,21 @@ dependencies {
 
     // Routes jadx-core's SLF4J logging to stderr so it doesn't touch stdout.
     implementation 'org.slf4j:slf4j-simple:2.0.17'
+
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.11.4'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+test {
+    useJUnitPlatform()
+}
+
+// jadx-dex-input has a transitive dependency on smali-baksmali, which lives on
+// dl.google.com (Google Maven). That host is not required for any test we run,
+// so exclude it from the test classpath to keep `gradle test` self-contained.
+// The shadowJar task still bundles jadx-dex-input via runtimeClasspath.
+configurations.testRuntimeClasspath {
+    exclude group: 'io.github.skylot', module: 'jadx-dex-input'
 }
 
 jar {
