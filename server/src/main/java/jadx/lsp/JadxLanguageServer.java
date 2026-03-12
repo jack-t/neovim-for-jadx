@@ -171,15 +171,17 @@ public class JadxLanguageServer
             ICodeNodeRef ref = toNodeRef(codeInfo.getCodeMetadata().getAt(offset));
             if (ref == null) return left(empty);
 
-            JavaNode target = jadx.getJavaNodeByRef(ref);
+            JavaNode  target       = jadx.getJavaNodeByRef(ref);
             if (target == null) return left(empty);
+
+            JavaClass targetCls    = target.getTopParentClass();
+            ICodeInfo targetCdInfo = targetCls.getCodeInfo(); // triggers decompilation before getDefPos()
 
             int defPos = target.getDefPos();
             if (defPos <= 0) return left(empty);
 
-            JavaClass targetCls  = target.getTopParentClass();
-            String    targetCode = targetCls.getCodeInfo().getCodeStr();
-            Position  pos        = PositionConverter.toPosition(targetCode, defPos);
+            String   targetCode = targetCdInfo.getCodeStr();
+            Position pos        = PositionConverter.toPosition(targetCode, defPos);
             Location  loc        = new Location(
                     "jadx://" + targetCls.getFullName(),
                     new Range(pos, pos));
