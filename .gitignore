@@ -1,3 +1,6 @@
 # Gradle build outputs
 server/.gradle/
 server/build/
+
+# ignore test data
+*.apk
