@@ -124,42 +124,14 @@ function M.setup(opts)
     init_options.jadxFile = opts.file
   end
 
-  -- Start the LSP client.
-  client_id = vim.lsp.start_client({
-    name    = "jadx",
-    cmd     = cmd,
-    init_options = init_options,
-    capabilities = vim.lsp.protocol.make_client_capabilities(),
-    on_exit = function(code, _signal)
-      vim.schedule(function()
-        vim.notify(("jadx: LSP server exited (code %d)"):format(code), vim.log.levels.WARN)
-      end)
-      client_id = nil
-    end,
-  })
-
-  if not client_id then
-    vim.notify("jadx: failed to start LSP client", vim.log.levels.ERROR)
-    return
-  end
-
-  -- Handle `:edit jadx://com.example.ClassName`
-  vim.api.nvim_create_autocmd("BufReadCmd", {
-    pattern  = "jadx://*",
-    callback = function(ev)
-      read_jadx_buf(ev.buf)
-    end,
-    desc = "jadx: load decompiled source into buffer",
-  })
-
-  -- Override the definition handler for jadx:// targets.
+  -- Definition handler for jadx:// targets (per-client, not global).
   --
   -- The default handler calls jump_to_location, which opens the buffer and
   -- immediately tries to set the cursor.  For jadx:// buffers the source
   -- arrives asynchronously, so the cursor positioning must be deferred until
   -- after fill_buffer runs.  If the buffer is already loaded (the user opened
   -- it before), we jump right away.
-  vim.lsp.handlers["textDocument/definition"] = function(err, result, ctx, _)
+  local definition_handler = function(err, result, ctx, _)
     if err or not result then return end
     local locs = vim.islist(result) and result or { result }
     if #locs == 0 then return end
@@ -188,6 +160,49 @@ function M.setup(opts)
       vim.lsp.util.jump_to_location(loc, enc)
     end
   end
+
+  -- Start the LSP client with a per-client definition handler so we don't
+  -- clobber the global handler used by other LSP servers.
+  client_id = vim.lsp.start_client({
+    name    = "jadx",
+    cmd     = cmd,
+    init_options = init_options,
+    capabilities = vim.lsp.protocol.make_client_capabilities(),
+    handlers = {
+      ["textDocument/definition"] = definition_handler,
+    },
+    on_exit = function(code, _signal)
+      vim.schedule(function()
+        vim.notify(("jadx: LSP server exited (code %d)"):format(code), vim.log.levels.WARN)
+      end)
+      client_id = nil
+    end,
+  })
+
+  if not client_id then
+    vim.notify("jadx: failed to start LSP client", vim.log.levels.ERROR)
+    return
+  end
+
+  -- Handle `:edit jadx://com.example.ClassName`
+  local group = vim.api.nvim_create_augroup("jadx_nvim", { clear = true })
+  vim.api.nvim_create_autocmd("BufReadCmd", {
+    group    = group,
+    pattern  = "jadx://*",
+    callback = function(ev)
+      read_jadx_buf(ev.buf)
+    end,
+    desc = "jadx: load decompiled source into buffer",
+  })
+
+  -- User commands.
+  vim.api.nvim_create_user_command("JadxLoad", function(cmd_opts)
+    M.load_file(cmd_opts.args)
+  end, { nargs = 1, complete = "file", desc = "Hot-load an APK/DEX/JAR into jadx" })
+
+  vim.api.nvim_create_user_command("JadxOpen", function(cmd_opts)
+    M.open(cmd_opts.args)
+  end, { nargs = 1, desc = "Open a decompiled class by fully-qualified name" })
 end
 
 --- Convenience command: open a class by FQN in a new buffer.

@@ -80,9 +80,9 @@ Fix: the plugin overrides `vim.lsp.handlers["textDocument/definition"]`.
   a `workspace/executeCommand` to hot-load a file would be useful.
 - Hover covers CLASS/METHOD/FIELD only; local variable types (VarNode, which is
   internal API) are not yet surfaced.
-- `server/build.gradle` dependency versions (`jadx-core:1.5.0`,
-  `org.eclipse.lsp4j:0.21.2`) should be verified against Maven Central before
-  first build — they were current at time of writing but not yet compiled.
+- `server/build.gradle` dependency versions (`jadx-core:1.5.4`,
+  `org.eclipse.lsp4j:0.24.0`) should be verified against Maven Central before
+  first build.
 - APK input support may require additional jadx plugin JARs on the classpath
   beyond `jadx-core`; `mergeServiceFiles()` in the shadow task ensures the
   ServiceLoader entries survive JAR merging.

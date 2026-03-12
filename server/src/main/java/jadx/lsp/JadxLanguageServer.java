@@ -175,7 +175,7 @@ public class JadxLanguageServer
             if (target == null) return left(empty);
 
             int defPos = target.getDefPos();
-            if (defPos <= 0) return left(empty);
+            if (defPos < 0) return left(empty);
 
             JavaClass targetCls  = target.getTopParentClass();
             String    targetCode = targetCls.getCodeInfo().getCodeStr();
