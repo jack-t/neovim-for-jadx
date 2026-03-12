@@ -47,10 +47,18 @@ vim.api.nvim_create_autocmd("VimEnter", {
   callback = function()
     vim.notify(
       "jadx.nvim loaded in isolated mode\n\n" ..
-      "Test commands:\n" ..
-      "  :edit jadx://java.lang.String\n" ..
-      "  :JadxLoad /path/to/app.apk\n" ..
-      "  :q to exit",
+      "Commands:\n" ..
+      "  :edit jadx://java.lang.String   Open a class\n" ..
+      "  :JadxOpen <fqn>                 Open a class by name\n" ..
+      "  :JadxLoad /path/to/app.apk      Hot-load a file\n" ..
+      "  :JadxSearch                      Fuzzy-search symbols (fzf)\n" ..
+      "  :JadxStatus                      Open status buffer\n" ..
+      "\n" ..
+      "Keybindings (leader = \\):\n" ..
+      "  \\jo   Open class     \\js   Search symbols\n" ..
+      "  \\jl   Load file      \\ji   Status buffer\n" ..
+      "  gd    Go to def      K     Hover info\n" ..
+      "\n  :q to exit",
       vim.log.levels.INFO
     )
   end,
