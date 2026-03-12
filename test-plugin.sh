@@ -10,6 +10,12 @@ set -e
 # Get the absolute path to the plugin directory
 PLUGIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# Extract APK file path from arguments (consume it so Neovim doesn't try to open it as a zip)
+APK_FILE="${1:-}"
+if [ -n "$APK_FILE" ]; then
+  shift
+fi
+
 # Create temporary directories for isolated Neovim environment
 NVIM_CONFIG=$(mktemp -d)
 NVIM_DATA=$(mktemp -d)
@@ -25,7 +31,7 @@ vim.opt.rtp:prepend("$PLUGIN_DIR")
 -- Configure the jadx plugin
 require("jadx").setup({
   cmd = { "python3", "$PLUGIN_DIR/stub/server.py" },
-  file = "${1:-}",  -- Optional APK file from command line
+  file = "$APK_FILE",  -- Optional APK file from command line
 })
 
 -- Optional: print startup message
