@@ -27,6 +27,15 @@ repositories {
     google()
 }
 
+sourceSets {
+    integrationTest {
+        java.srcDir 'src/integrationTest/java'
+        resources.srcDir 'src/integrationTest/resources'
+        compileClasspath += sourceSets.main.output
+        runtimeClasspath += sourceSets.main.output
+    }
+}
+
 dependencies {
     // https://central.sonatype.com/artifact/io.github.skylot/jadx-core
     implementation 'io.github.skylot:jadx-core:1.5.4'
@@ -46,10 +55,26 @@ dependencies {
     testImplementation 'org.junit.jupiter:junit-jupiter:5.11.4'
     testImplementation 'org.mockito:mockito-core:5.11.0'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+
+    // Integration test dependencies
+    integrationTestImplementation 'org.junit.jupiter:junit-jupiter:5.11.4'
+    integrationTestImplementation 'org.mockito:mockito-core:5.11.0'
+    integrationTestRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+
+    // DEX file generation from smali source
+    integrationTestImplementation 'com.android.tools.smali:smali:3.0.3'
+    integrationTestRuntimeOnly 'io.github.skylot:jadx-dex-input:1.5.4'
 }
 
 test {
     useJUnitPlatform()
+}
+
+task integrationTest(type: Test) {
+    useJUnitPlatform()
+    testClassesDirs = sourceSets.integrationTest.output.classesDirs
+    classpath = sourceSets.integrationTest.runtimeClasspath
+    shouldRunAfter test
 }
 
 // jadx-dex-input has a transitive dependency on smali-baksmali, which lives on
