@@ -4,3 +4,4 @@ server/build/
 
 # ignore test data
 *.apk
+/server/build/test-fixtures/*.dex

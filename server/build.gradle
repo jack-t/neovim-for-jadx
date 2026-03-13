@@ -36,6 +36,10 @@ sourceSets {
     }
 }
 
+tasks.matching { it.name == 'processIntegrationTestResources' }.configureEach {
+    duplicatesStrategy = 'include'
+}
+
 dependencies {
     // https://central.sonatype.com/artifact/io.github.skylot/jadx-core
     implementation 'io.github.skylot:jadx-core:1.5.4'
@@ -59,10 +63,9 @@ dependencies {
     // Integration test dependencies
     integrationTestImplementation 'org.junit.jupiter:junit-jupiter:5.11.4'
     integrationTestImplementation 'org.mockito:mockito-core:5.11.0'
+    integrationTestImplementation 'org.eclipse.lsp4j:org.eclipse.lsp4j:0.24.0'
+    integrationTestImplementation 'com.google.code.gson:gson:2.10.1'
     integrationTestRuntimeOnly 'org.junit.platform:junit-platform-launcher'
-
-    // DEX file generation from smali source
-    integrationTestImplementation 'com.android.tools.smali:smali:3.0.3'
     integrationTestRuntimeOnly 'io.github.skylot:jadx-dex-input:1.5.4'
 }
 
@@ -83,6 +86,11 @@ task integrationTest(type: Test) {
 // The shadowJar task still bundles jadx-dex-input via runtimeClasspath.
 configurations.testRuntimeClasspath {
     exclude group: 'io.github.skylot', module: 'jadx-dex-input'
+}
+
+// Same for integration tests
+configurations.integrationTestRuntimeClasspath {
+    exclude group: 'com.android.tools.smali', module: 'smali-baksmali'
 }
 
 jar {
