@@ -107,3 +107,33 @@ shadowJar {
 }
 
 build.dependsOn shadowJar
+
+// Task to run the server (for manual testing)
+// Usage: gradle -p server runServer -Djadx.file=/path/to/app.apk
+task runServer(type: JavaExec) {
+    group = "jadx"
+    description = "Start the jadx-lsp server (for manual testing)"
+    classpath = shadowJar.archiveFile
+    mainClass = 'jadx.lsp.Main'
+
+    def jadxFile = System.getProperty('jadx.file')
+    if (jadxFile) {
+        args '--jadxFile=' + jadxFile
+    }
+
+    standardInput = System.in
+    standardOutput = System.out
+    errorOutput = System.err
+}
+
+// Task to run E2E tests
+// This calls the bash script at the repo root
+task e2eTest(type: Exec) {
+    group = "verification"
+    description = "Run end-to-end plugin tests"
+
+    def repoRoot = project.rootDir.parentFile
+    commandLine "bash", repoRoot.absolutePath + "/run_e2e_tests.sh"
+
+    dependsOn shadowJar
+}
