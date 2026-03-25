@@ -21,10 +21,11 @@ java {
 }
 
 repositories {
+    mavenLocal()
     mavenCentral()
     // Required for com.android.tools.smali:smali-baksmali (transitive dep of jadx-dex-input)
     // and other Android tooling pulled in transitively by jadx-dex-input.
-    google()
+    // google() is blocked in this environment; smali artifacts are pre-built locally.
 }
 
 sourceSets {
@@ -113,7 +114,7 @@ build.dependsOn shadowJar
 task runServer(type: JavaExec) {
     group = "jadx"
     description = "Start the jadx-lsp server (for manual testing)"
-    classpath = shadowJar.archiveFile
+    classpath = files(shadowJar.archiveFile)
     mainClass = 'jadx.lsp.Main'
 
     def jadxFile = System.getProperty('jadx.file')
