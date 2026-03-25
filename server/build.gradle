@@ -21,11 +21,10 @@ java {
 }
 
 repositories {
-    mavenLocal()
     mavenCentral()
     // Required for com.android.tools.smali:smali-baksmali (transitive dep of jadx-dex-input)
     // and other Android tooling pulled in transitively by jadx-dex-input.
-    // google() is blocked in this environment; smali artifacts are pre-built locally.
+    google()
 }
 
 sourceSets {
